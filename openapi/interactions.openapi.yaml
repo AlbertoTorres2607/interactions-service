@@ -1,0 +1,100 @@
+openapi: 3.0.3
+info:
+  title: Dev Space - Interactions Service (REST for write, GraphQL for read)
+  version: 1.0.1
+servers:
+  - url: http://localhost:3000
+paths:
+  /comments:
+    post:
+      summary: Crear comentario
+      description: Crea un comentario (opcionalmente respuesta a otro).
+      parameters:
+        - $ref: '#/components/parameters/XUserId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [postId, text]
+              properties:
+                postId: { type: string }
+                text: { type: string, maxLength: 2000 }
+                parentCommentId: { type: string, nullable: true }
+      responses:
+        "201":
+          description: Creado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string }
+  /comments/{id}:
+    put:
+      summary: Editar comentario (sólo autor)
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - $ref: '#/components/parameters/XUserId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [text]
+              properties:
+                text: { type: string, maxLength: 2000 }
+      responses:
+        "200": { description: OK }
+        "403": { description: Prohibido }
+        "404": { description: No encontrado }
+    delete:
+      summary: Eliminar comentario (soft-delete, sólo autor)
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - $ref: '#/components/parameters/XUserId'
+      responses:
+        "204": { description: Eliminado }
+        "403": { description: Prohibido }
+        "404": { description: No encontrado }
+  /comments/{id}/like:
+    post:
+      summary: Dar like (idempotente)
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - $ref: '#/components/parameters/XUserId'
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  liked: { type: boolean }
+                  dedup: { type: boolean }
+    delete:
+      summary: Quitar like (idempotente)
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - $ref: '#/components/parameters/XUserId'
+      responses:
+        "200": { description: OK }
+
+components:
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema: { type: string }
+    XUserId:
+      name: X-User-Id
+      in: header
+      required: false
+      description: >
+        Identidad del usuario inyectada por el gateway (p.ej. Kong).
+        Si no se envía, el servicio usará "demo-user" para pruebas locales.
+      schema: { type: string }
