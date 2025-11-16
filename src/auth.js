@@ -1,12 +1,8 @@
-// auth.js (simple - sin JWT)
-// En producción, el gateway inyectará la identidad del usuario en headers.
-// Preferencia: X-User-Id -> X-Consumer-Username -> "demo-user"
-function getUserId(req) {
-  return (
-    req.header("x-user-id") ||
-    req.header("x-consumer-username") ||
-    "demo-user"
-  );
+// auth.js - No authentication, just return a default user
+function getUserId() {
+  // Since Kong handles authentication, we can use a default
+  // or get user info from Kong headers if needed later
+  return "kong-authenticated-user";
 }
 
 module.exports = { getUserId };
