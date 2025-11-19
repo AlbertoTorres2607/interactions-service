@@ -15,10 +15,21 @@ const { graphqlHTTP } = require("express-graphql");
 const schema = require("./graphql/schema");
 const resolvers = require("./graphql/resolvers");
 
+const RabbitMQConsumer = require("./rabbitmq/consumer");
 const restRouter = require("./routes/rest");
 
 async function main() {
   await connectDB();
+
+  // Start RabbitMQ Consumer
+  const rabbitConsumer = new RabbitMQConsumer();
+  try {
+    await rabbitConsumer.connect();
+    await rabbitConsumer.startConsuming();
+    console.log('[RabbitMQ] Consumer started successfully');
+  } catch (error) {
+    console.error('[RabbitMQ] Failed to start consumer:', error);
+  }
 
   const app = express();
   app.use(helmet());
@@ -56,6 +67,13 @@ async function main() {
     console.log(`REST:     http://localhost:${config.port}/api`);
     console.log(`GraphQL:  http://localhost:${config.port}/graphql`);
     console.log(`Swagger:  http://localhost:${config.port}/docs`);
+  });
+
+  // Graceful shutdown
+  process.on('SIGINT', async () => {
+    console.log('Shutting down gracefully...');
+    await rabbitConsumer.close();
+    process.exit(0);
   });
 }
 

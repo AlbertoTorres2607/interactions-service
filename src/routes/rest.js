@@ -2,14 +2,170 @@ const express = require("express");
 const mongoose = require("mongoose");
 const Comment = require("../models/Comment");
 const Like = require("../models/Like");
+const PostInteraction = require("../models/PostInteraction");
 const { getUserId } = require("../auth");
 
 const r = express.Router();
 
-// Crear comentario - no auth needed
-r.post("/comments", async (req, res) => {
+// Get post interactions (likes and comments count)
+r.get("/interactions/posts/:postId", async (req, res) => {
+  const { postId } = req.params;
+
+  const interactions = await PostInteraction.findOne({ postId });
+  
+  return res.json({
+    postId,
+    likesCount: interactions?.likesCount || 0,
+    commentsCount: interactions?.commentsCount || 0,
+    lastActivityAt: interactions?.lastActivityAt || null
+  });
+});
+
+// Get comments for a post
+r.get("/interactions/posts/:postId/comments", async (req, res) => {
+  const { postId } = req.params;
+  const { limit = 20, offset = 0 } = req.query;
+
+  const comments = await Comment.find({ 
+    postId, 
+    isDeleted: false,
+    parentCommentId: null // Only top-level comments
+  })
+  .sort({ createdAt: -1 })
+  .limit(parseInt(limit))
+  .skip(parseInt(offset));
+
+  const total = await Comment.countDocuments({ 
+    postId, 
+    isDeleted: false,
+    parentCommentId: null 
+  });
+
+  return res.json({
+    comments: comments.map(c => ({
+      id: String(c._id),
+      postId: c.postId,
+      authorId: c.authorId,
+      text: c.text,
+      likesCount: c.likesCount,
+      createdAt: c.createdAt,
+      updatedAt: c.updatedAt
+    })),
+    total,
+    hasMore: total > parseInt(offset) + comments.length
+  });
+});
+
+// Like a post (synchronous - for immediate feedback)
+r.post("/interactions/posts/:postId/like", async (req, res) => {
+  const { postId } = req.params;
+  const userId = getUserId();
+
+  try {
+    await Like.create({ 
+      targetType: 'post', 
+      targetId: postId, 
+      userId 
+    });
+
+    // Update post interactions count
+    await PostInteraction.findOneAndUpdate(
+      { postId },
+      { 
+        $inc: { likesCount: 1 },
+        $set: { lastActivityAt: new Date() }
+      },
+      { upsert: true, new: true }
+    );
+
+    return res.json({ liked: true });
+  } catch (e) {
+    if (e && e.code === 11000) {
+      return res.json({ liked: true, dedup: true });
+    }
+    throw e;
+  }
+});
+
+// Unlike a post (synchronous)
+r.delete("/interactions/posts/:postId/like", async (req, res) => {
+  const { postId } = req.params;
+  const userId = getUserId();
+
+  const result = await Like.deleteOne({ 
+    targetType: 'post', 
+    targetId: postId, 
+    userId 
+  });
+
+  if (result.deletedCount > 0) {
+    await PostInteraction.findOneAndUpdate(
+      { postId },
+      { 
+        $inc: { likesCount: -1 },
+        $set: { lastActivityAt: new Date() }
+      }
+    );
+  }
+
+  return res.json({ liked: false });
+});
+
+// Check if user liked a post
+r.get("/interactions/posts/:postId/like", async (req, res) => {
+  const { postId } = req.params;
+  const userId = getUserId();
+
+  const like = await Like.findOne({ 
+    targetType: 'post', 
+    targetId: postId, 
+    userId 
+  });
+
+  return res.json({ liked: !!like });
+});
+
+// Get replies for a comment
+r.get("/interactions/comments/:commentId/replies", async (req, res) => {
+  const { commentId } = req.params;
+  const { limit = 20, offset = 0 } = req.query;
+
+  if (!mongoose.isValidObjectId(commentId)) {
+    return res.status(400).json({ error: "commentId inválido" });
+  }
+
+  const replies = await Comment.find({ 
+    parentCommentId: commentId,
+    isDeleted: false
+  })
+  .sort({ createdAt: 1 })
+  .limit(parseInt(limit))
+  .skip(parseInt(offset));
+
+  const total = await Comment.countDocuments({ 
+    parentCommentId: commentId,
+    isDeleted: false 
+  });
+
+  return res.json({
+    replies: replies.map(r => ({
+      id: String(r._id),
+      postId: r.postId,
+      authorId: r.authorId,
+      text: r.text,
+      likesCount: r.likesCount,
+      createdAt: r.createdAt,
+      updatedAt: r.updatedAt
+    })),
+    total,
+    hasMore: total > parseInt(offset) + replies.length
+  });
+});
+
+// Existing comment routes - update to use interactions prefix
+r.post("/interactions/comments", async (req, res) => {
   const { postId, text, parentCommentId = null } = req.body || {};
-  const userId = getUserId(); // No req parameter needed
+  const userId = getUserId();
 
   if (!postId || !text || typeof text !== "string" || text.trim().length === 0) {
     return res.status(400).json({ error: "postId y text son obligatorios" });
@@ -29,7 +185,7 @@ r.post("/comments", async (req, res) => {
 });
 
 // Editar comentario - simplified
-r.put("/comments/:id", async (req, res) => {
+r.put("/interactions/comments/:id", async (req, res) => {
   const { id } = req.params;
   const { text } = req.body || {};
   const userId = getUserId();
@@ -49,7 +205,7 @@ r.put("/comments/:id", async (req, res) => {
 });
 
 // Eliminar comentario - simplified
-r.delete("/comments/:id", async (req, res) => {
+r.delete("/interactions/comments/:id", async (req, res) => {
   const { id } = req.params;
   const userId = getUserId();
 
@@ -64,8 +220,8 @@ r.delete("/comments/:id", async (req, res) => {
   return res.status(204).send();
 });
 
-// Dar like - simplified
-r.post("/comments/:id/like", async (req, res) => {
+// Dar like a comentario - simplified
+r.post("/interactions/comments/:id/like", async (req, res) => {
   const { id } = req.params;
   const userId = getUserId();
 
@@ -86,8 +242,8 @@ r.post("/comments/:id/like", async (req, res) => {
   }
 });
 
-// Quitar like - simplified
-r.delete("/comments/:id/like", async (req, res) => {
+// Quitar like de comentario - simplified
+r.delete("/interactions/comments/:id/like", async (req, res) => {
   const { id } = req.params;
   const userId = getUserId();
 
