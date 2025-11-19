@@ -1,17 +1,32 @@
 services:
   mongo:
-    image: mongo:7
-    restart: always
-    ports: ["27017:27017"]
-    volumes:
-      - mongo_data:/data/db
+    image: mongo:6
+    ports:
+      - "27017:27017"
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    environment:
+      RABBITMQ_DEFAULT_USER: admin
+      RABBITMQ_DEFAULT_PASS: password
+    ports:
+      - "5672:5672"
+      - "15672:15672"
 
   interactions:
-    build: .
-    restart: always
-    ports: ["3000:3000"]
-    env_file: .env
-    depends_on: [mongo]
-
-volumes:
-  mongo_data:
+    build:
+      context: .          # <— AQUÍ el cambio: la raíz actual
+      dockerfile: Dockerfile
+    container_name: interactions-service
+    environment:
+      - PORT=3000
+      - MONGO_URL=mongodb://mongo:27017/devspace
+      - RABBITMQ_URL=amqp://admin:password@rabbitmq:5672
+      - RMQ_EXCHANGE=post.interactions
+      - RMQ_LIKES_QUEUE=interactions.likes
+      - RMQ_COMMENTS_QUEUE=interactions.comments
+    depends_on:
+      - mongo
+      - rabbitmq
+    ports:
+      - "3000:3000"
